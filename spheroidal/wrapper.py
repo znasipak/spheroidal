@@ -227,3 +227,43 @@ def harmonic_deriv(
         raise ValueError("Only the first two derivatives wrt theta are currently supported")
 
     return lambda theta, phi: dS_theta(theta, phi) * (m * 1j) ** n_phi
+
+
+class SpinWeightedSpheroidalHarmonic(SpinWeightedSpheroidalHarmonicSpectral):
+    r"""Computes the derivative of the spin-weighted spheroidal harmonic
+    with spin-weight s, degree l, order m, and spheroidicity g.
+
+    Supported methods:
+
+    * "spectral" (default): uses the spherical expansion method described in Appendix A of
+        `(Hughes, 2000) <https://journals.aps.org/prd/pdf/10.1103/PhysRevD.61.084004>`_
+    * "leaver": uses the continued fraction method described in
+        `(Leaver, 1985) <https://www.edleaver.com/Misc/EdLeaver/Publications/Analytic
+        RepresentationForQuasinormalModesOfKerrBlackHoles.pdf>`_
+
+    Parameters
+    ----------
+    s : int or half-integer float
+        spin-weight
+    ell : int or half-integer float
+        degree
+    m : int or half-integer float
+        order
+    g : complex
+        spheroidicity
+    method : str, optional
+        method used to compute the harmonic, defaults to "spectral"
+    n_theta : int, optional
+        number of derivatives with respect to theta (options are 0, 1 and 2), defaults to 1
+    n_phi : int, optional
+        number of derivatives with respect to phi, defaults to 0
+    num_terms : int, optional
+        number of terms used in the expansion, automatic by default
+    n_max : int, optional
+        maximum number of terms in the expansion, defaults to 100
+    """
+    def __init__(self, s, l, m, gamma, method = 'spectral', **kwargs):
+        if method == 'spectral':
+            SpinWeightedSpheroidalHarmonicSpectral.__init__(self, s, l, m, gamma, **kwargs)
+        else:
+            raise ValueError(f'{method} is not a valid method type')

@@ -1,9 +1,10 @@
 """Module containing functions for computing spin weighted spherical harmonics and spherical-spheroidal mixing coefficients."""
 import numpy as np
-from scipy.special import factorial, binom
+from scipy.special import factorial, binom, poch, lpmv, gammaln
 from numpy import sqrt, sin, cos, exp, pi
 from scipy.linalg import eig_banded, eigvals_banded
 from numba import njit
+from spherical import Wigner3j
 
 
 def sphericalY_eigenvalue(s, l, m):
@@ -27,8 +28,119 @@ def sphericalY_eigenvalue(s, l, m):
     """
     return l * (l + 1) - s * (s + 1)
 
+def Ylm(l, m, z):
+    return np.sqrt((2.*l + 1)/(4.*np.pi))*np.exp(0.5*(gammaln(l - m + 1) - gammaln(l + m + 1)))*lpmv(m, l, z)
+
+def clm(l, m):
+    if abs(m) > l:
+        return 0.
+    return np.sqrt((l - m)/(2.*l + 1.))*np.sqrt((l + m)/(2.*l - 1.))
+
+def Asljm(s, l, j, m): 
+    if np.abs(l-j) > np.abs(s): 
+        return 0.
+    if j < np.abs(m): 
+        return 0.
+    lmin = abs(s) if abs(m) < abs(s) else abs(m)
+    if l < lmin:
+        return 0
+    aslmg = pow(-1., m + s*(1 + np.sign(s))/2)
+    aslmg *= np.sqrt(pow(4, np.abs(s))*pow(factorial(np.abs(s)), 2)*(2*j + 1)*(2*l + 1)/factorial(np.abs(2*s)))
+    aslmg *= Wigner3j(abs(s), l, j, 0, m, -m)
+    aslmg *= Wigner3j(abs(s), l, j, s, -s, 0)
+
+    return aslmg
+
+def dAsljm(s, l, j, m): 
+    return (j + 2. + abs(s))*clm(j + 1, m)*Asljm(s, l, j + 1, m) - (j - 1 - abs(s))*clm(j, m)*Asljm(s, l, j - 1, m)
+
+def sphericalY_expansion(s, l, m):
+    if s==0:
+        def Y(theta, phi):
+            return Ylm(l, m, np.cos(theta)) * exp(1j * m * phi)
+        return Y
+    
+    lmin = np.max([np.abs(m), l - np.abs(s)])
+    lmax = l + np.abs(s)
+
+    def Y(theta, phi):
+        z = np.cos(theta)
+        yslm = 0.*z
+
+        for i in range(lmin, lmax + 1):
+            yslm += Asljm(s, l, i, m)*Ylm(i, m, z)
+
+        return yslm * np.sqrt(1. - z**2)**(-np.abs(s)) * exp(1j * m * phi)
+    
+    return Y
+
+def sphericalY_expansion_deriv(s, l, m):
+    lmin = np.max([np.abs(m), l - np.abs(s) - 1])
+    lmax = l + np.abs(s) + 1
+
+    def Y(theta, phi):
+        z = np.cos(theta)
+        yslm = 0.*z
+
+        for i in range(lmin, lmax + 1):
+            yslm += dAsljm(s, l, i, m)*Ylm(i, m, z)
+
+        return - yslm * np.sqrt(1. - z**2)**(-np.abs(s) - 1) * exp(1j * m * phi)
+    
+    return Y
 
 def sphericalY(s, l, m):
+    r"""Computes the spin-weighted spherical harmonic with
+    spin weight s, degree l, and order m.
+
+    Parameters
+    ----------
+    s : int or half-integer float
+        spin weight
+    l : int
+        degree
+    m : int or half-integer float
+        order
+
+    Returns
+    -------
+    function
+        spin weighted spherical harmonic function
+        :math:`{}_{s}Y_{lm}(\theta,\phi)`
+    """
+
+    if l < 20:
+        return sphericalY_sum(s, l, m)
+    else:
+        return sphericalY_expansion(s, l, m)
+
+
+def sphericalY_deriv(s, l, m):
+    r"""Computes the derivative with respect to theta of the
+    spin-weighted spherical harmonic with spin weight s, degree l, and order m.
+
+    Parameters
+    ----------
+    s : int or half-integer float
+        spin weight
+    l : int
+        degree
+    m : int or half-integer float
+        order
+
+    Returns
+    -------
+    function
+        spin weighted spherical harmonic function
+        :math:`\frac{d{}_{s}Y_{lm}(\theta,\phi)}{d\theta}`
+    """
+    if l < 20:
+        return sphericalY_sum_deriv(s, l, m)
+    else:
+        return sphericalY_expansion_deriv(s, l, m)
+
+
+def sphericalY_sum(s, l, m):
     r"""Computes the spin-weighted spherical harmonic with
     spin weight s, degree l, and order m.
 
@@ -51,10 +163,10 @@ def sphericalY(s, l, m):
     # https://en.wikipedia.org/wiki/Spin-weighted_spherical_harmonics
     prefactor = (-1.0) ** (l + m - s + 0j)
     prefactor *= sqrt(
-        factorial(l + m)
-        * factorial(l - m)
+        poch(l + s + 1, m - s)
+        * poch(l - s + 1, s - m)
         * (2 * l + 1)
-        / (4 * pi * factorial(l + s) * factorial(l - s))
+        / (4 * pi )
     )
 
     def Y(theta, phi):
@@ -71,7 +183,7 @@ def sphericalY(s, l, m):
     return Y
 
 
-def sphericalY_deriv(s, l, m):
+def sphericalY_sum_deriv(s, l, m):
     r"""Computes the derivative with respect to theta of the
     spin-weighted spherical harmonic with spin weight s, degree l, and order m.
 
@@ -92,10 +204,10 @@ def sphericalY_deriv(s, l, m):
     """
     # https://en.wikipedia.org/wiki/Spin-weighted_spherical_harmonics
     prefactor = (-1.0) ** (l + m - s + 0j) * sqrt(
-        factorial(l + m)
-        * factorial(l - m)
+        poch(l + s + 1, m - s)
+        * poch(l - s + 1, s - m)
         * (2 * l + 1)
-        / (4 * pi * factorial(l + s) * factorial(l - s))
+        / (4 * pi )
     )
 
     def dY(theta, phi):
@@ -268,25 +380,18 @@ def _diag2(s, m, g, l):
     double
     """
     return -(
-        (-1) ** (2 * (l + m))
+        (-1.) ** (2. * (l + m))
         * g**2
         * sqrt(
             (
-                (1 + l - m)
-                * (2 + l - m)
-                * (1 + l + m)
-                * (2 + l + m)
-                * (1 + l - s)
-                * (2 + l - s)
-                * (1 + l + s)
-                * (2 + l + s)
-            )
-            / (
-                (1 + l) ** 2
-                * (2 + l) ** 2
-                * (1 + 2 * l)
-                * (3 + 2 * l) ** 2
-                * (5 + 2 * l)
+                (1. + l - m)/(1. + l)
+                * (2. + l - m)/(2. + l)
+                * (1. + l + m)/(1. + 2. * l)
+                * (2. + l + m)/(3. + 2. * l)
+                * (1. + l - s)/(1. + l)
+                * (2. + l - s)/(2. + l)
+                * (1. + l + s)/(3. + 2. * l)
+                * (2. + l + s)/(5. + 2. * l)
             )
         )
     )
@@ -433,3 +538,50 @@ def mixing_coefficients(s, ell, m, g, num_terms):
         sign = np.sign(eigenvectors[int(ell - l_min)][int(ell - l_min)])
 
         return sign * eigenvectors[int(ell - l_min)]
+    
+def mixing_coefficients_and_separation_constants(s, ell, m, g, num_terms):
+    """Computes the spherical-spheroidal mixing coefficients
+    and the spheroidal eigenvalues (angular separation constants) 
+    up to the specified number of terms
+
+    Parameters
+    ----------
+    s : int or half-integer float
+        spin weight
+    m : int or half-integer float
+        order
+    g : complex
+        spheroidicity
+    num_terms : int
+        number of terms in the expansion
+
+    Returns
+    -------
+    (numpy.ndarray, numpy.ndarray)
+        array of mixing coefficients, array of eigenvalues
+    """
+    l_min = max(abs(s), abs(m))
+
+    # if g is complex, use full matrix
+    if np.iscomplex(g):
+        matrix = spectral_matrix_complex(s, m, g, num_terms)
+        w, v = np.linalg.eig(matrix)
+        v = np.transpose(v)
+        v = v[np.argsort(abs(w))]
+        w = w[np.argsort(abs(w))]
+
+        return (v[int(ell - l_min)], w)
+    # if g is real, matrix is symmetric, so eig_banded can be used
+    else:
+        g = np.real_if_close(g)
+        bands = spectral_matrix_bands(s, m, g, num_terms)
+        eigs_output = eig_banded(bands, lower=True)
+        # eig_banded returns the separation constants in ascending order
+        # so eigenvectors are sorted by increasing spheroidal eigenvalue
+        eigenvectors = np.transpose(eigs_output[1])
+        eigenvalues = eigs_output[0]
+
+        # enforce sign convention that ell=l mode is positive
+        sign = np.sign(eigenvectors[int(ell - l_min)][int(ell - l_min)])
+
+        return (sign * eigenvectors[int(ell - l_min)], eigenvalues)
